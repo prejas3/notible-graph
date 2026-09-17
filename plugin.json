@@ -1,7 +1,7 @@
 {
   "id": "notible.graph",
   "name": "Notible Graph",
-  "version": "0.11.3",
+  "version": "0.11.4",
   "apiVersion": "1.8",
   "minCoreVersion": "0.80.0",
   "description": "ALPHA — a map of the workspace: every object is a dot sized by how connected it is, coloured by its type, placed near what it relates to. Titles show for the dots that carry the structure and for whatever the pointer is over. Draws three kinds of edge and keeps them apart: containment, stored [[wikilinks]], and suggested edges from shared tags and title words, drawn weaker and always saying why. Hover a dot to fade everything it has no edge to; click a type in the legend to hide it. Built to show what the sidebar tree cannot: links that cross project boundaries, objects filed under nothing, and objects about the same thing that nobody linked. The visual design is still settling.",

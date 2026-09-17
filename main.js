@@ -112,8 +112,8 @@ const GAP = 30;
 // room to be seen. Retuned for dots and measured on a dense random fixture
 // (scratchpad, per the "verify physics empirically" rule): the card version's
 // 8800 assumed a node 150 units wide and at dot scale flung everything to the
-// canvas edges. 1600 with the live loop's 0.88 damping settles a 40-node graph
-// in ~250 frames and a 150-node one in ~550, overlap-free at every size.
+// canvas edges. 1600 with the live loop's damping settles a 40-node graph in
+// ~250 frames and a 150-node one in ~550, overlap-free at every size.
 const PULL = { parent: 0.008, link: 0.0035, semantic: 0.0014 };
 const REPULSION = 1600;
 /** The uncooled separation pass's margin: just under GAP, a hard non-overlap
@@ -635,7 +635,7 @@ function separate(nodes, passes = 200) {
  * Returns the mean squared displacement over the tick — the caller's cue that
  * the graph has stopped moving and the loop can stop with it.
  */
-export function simulationStep(nodes, edges, { damping = 0.88, centre = null } = {}) {
+export function simulationStep(nodes, edges, { damping = 0.82, centre = null } = {}) {
   if (!nodes.length) return 0;
   const byId = new Map(nodes.map((node) => [node.id, node]));
   const middle = centre ?? {
@@ -729,8 +729,20 @@ export function simulationStep(nodes, edges, { damping = 0.88, centre = null } =
 
 /** Below this mean squared displacement per node the graph has visibly stopped
  * and the loop stops with it. A 60fps O(n^2) loop that never ends is a battery
- * bug, not a feature. */
-const REST_ENERGY = 0.05;
+ * bug, not a feature.
+ *
+ * Was 0.05 — chasing residual motion far below one visible pixel. Measured
+ * (scratchpad, per the "verify physics empirically" rule) on a synthetic
+ * 230-node/780-edge graph — the density a real, well-used workspace opens
+ * the view on ("777 edges shown" on the live app) — the old threshold took
+ * 1950 frames (~32.5s at 60fps) of O(n^2) work per frame to park itself,
+ * long after the graph had visibly stopped moving. Damping alone barely
+ * moved that number (0.75–0.88 all landed between ~700 and ~1950 frames at
+ * this threshold) — the dominant lever is this threshold, not damping.
+ * 0.5 (this value) with 0.82 damping (below) settles the same fixture in
+ * ~330 frames (~5.5s), a ~6x cut, while 0.5 mean-squared-displacement is
+ * still sub-pixel motion at the canvas scale `canvasFor()` uses. */
+const REST_ENERGY = 0.5;
 /** Consecutive resting ticks before the loop parks itself. A couple of frames
  * of stillness in the middle of a settle is normal; twelve is not. */
 const REST_FRAMES = 12;
@@ -1441,19 +1453,20 @@ function mountSurface(context, { container, openObject }, { variant }) {
 
     // Which edge kinds are drawn.
     const layerGroup = element("div", { className: "ngraph-group ngraph-group--layers" });
-    for (const [kind, label] of [["link", "links"], ["parent", "inside"], ["semantic", "suggested"]]) {
+    for (const [kind, label] of [["link", "Links"], ["parent", "Inside"], ["semantic", "Suggested"]]) {
       layerGroup.append(makeToggle(label, true, (on) => { layers[kind] = on; refresh(); }));
     }
     controls.append(layerGroup);
+    controls.append(element("div", { className: "ngraph-sep" }));
 
     // The two views this plugin exists for: links that leave their container,
     // and notes filed under nothing. Both are pure show/hide over the same
     // positions — a data attribute on the canvas, the rest is CSS.
     const viewGroup = element("div", { className: "ngraph-group ngraph-group--views" });
-    viewGroup.append(makeToggle("crossing only", false, (on) => {
+    viewGroup.append(makeToggle("Crossing only", false, (on) => {
       if (on) canvas.dataset.crossingOnly = "yes"; else delete canvas.dataset.crossingOnly;
     }));
-    viewGroup.append(makeToggle("unfiled only", false, (on) => {
+    viewGroup.append(makeToggle("Unfiled only", false, (on) => {
       if (on) canvas.dataset.unfiledOnly = "yes"; else delete canvas.dataset.unfiledOnly;
     }));
     controls.append(viewGroup);
@@ -1481,12 +1494,12 @@ function mountSurface(context, { container, openObject }, { variant }) {
     };
     const legend = element("p", { className: "ngraph-legend" });
     legend.append(
-      text("span", "Edges:", "ngraph-legend-label"),
-      edgeKey("ngraph-key--link", "link", "A [[wikilink]] you wrote between two notes."),
-      edgeKey("ngraph-key--parent", "inside", "A note filed inside a container (folder or project)."),
-      edgeKey("ngraph-key--semantic", "suggested", "Notible's guess from shared words — not a stored link."),
-      edgeKey("ngraph-key--free", "filed under nothing", "A note with no container."),
-      text("span", "Types:", "ngraph-legend-label"),
+      text("span", "Edges", "ngraph-legend-label"),
+      edgeKey("ngraph-key--link", "Link", "A [[wikilink]] you wrote between two notes."),
+      edgeKey("ngraph-key--parent", "Inside", "A note filed inside a container (folder or project)."),
+      edgeKey("ngraph-key--semantic", "Suggested", "Notible's guess from shared words — not a stored link."),
+      edgeKey("ngraph-key--free", "Filed under nothing", "A note with no container."),
+      text("span", "Types", "ngraph-legend-label"),
     );
     // The type chips are FILTERS now, not just a key: click one to drop that
     // type (and its edges) from the canvas, click again to bring it back — the
@@ -1494,11 +1507,15 @@ function mountSurface(context, { container, openObject }, { variant }) {
     // <button> so the keyboard and screen reader work; `data-off` carries the
     // state so the same code that changes it also paints it.
     // A plugin type is namespaced (`notible.typewriter.chapter`); the chip
-    // shows the last segment, full name on hover.
+    // shows the last segment, capitalized (bare plugin type names are
+    // lower_snake_case; a raw `chapter` chip read as a typo next to `Note`
+    // and `Project` everywhere else in the app — same fix as Core's
+    // typeLabel()), full raw name on hover.
     const shortType = (type) => (type.includes(".") ? type.slice(type.lastIndexOf(".") + 1) : type);
+    const capitalize = (label) => label.charAt(0).toUpperCase() + label.slice(1);
     const TYPE_LEGEND_CAP = 14;
     for (const entry of canvas.types.slice(0, TYPE_LEGEND_CAP)) {
-      const chip = element("button", { type: "button", className: "ngraph-key ngraph-key--type" }, [text("span", shortType(entry.type))]);
+      const chip = element("button", { type: "button", className: "ngraph-key ngraph-key--type" }, [text("span", capitalize(shortType(entry.type)))]);
       chip.style.setProperty("--type-hue", String(entry.hue));
       chip.title = `${entry.type} — click to hide`;
       chip.dataset.off = "no";
@@ -1517,7 +1534,7 @@ function mountSurface(context, { container, openObject }, { variant }) {
     if (canvas.types.length > TYPE_LEGEND_CAP) {
       const rest = canvas.types.slice(TYPE_LEGEND_CAP);
       const more = text("span", `+${rest.length} more`, "ngraph-note ngraph-key--more");
-      more.title = rest.map((entry) => shortType(entry.type)).join(", ");
+      more.title = rest.map((entry) => capitalize(shortType(entry.type))).join(", ");
       legend.append(more);
     }
     shell.append(legend);
@@ -1654,8 +1671,8 @@ const styles = `
 .ngraph-canvas[data-panning="yes"] { cursor: grabbing; }
 /* Filled bordo rounded rectangle — the same treatment Core gives its own
    chrome buttons. */
-.ngraph-fit { border: 1px solid var(--notible-accent); border-radius: 7px; background: var(--notible-accent); padding: 5px 13px; color: var(--notible-on-accent); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
-.ngraph-fit:hover { border-color: var(--notible-accent-hover); background: var(--notible-accent-hover); }
+.ngraph-fit { border: 0; border-radius: 999px; height: 26px; background: var(--notible-accent); padding: 0 14px; color: var(--notible-on-accent); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.ngraph-fit:hover { background: var(--notible-accent-hover); }
 .ngraph-fit:focus-visible { outline: 2px solid var(--notible-accent); outline-offset: 2px; }
 /* Edges rest FAINT — the point of the graph is the shape of the network, and
    at full strength a few hundred lines are the hairball. They come up to full
@@ -1736,42 +1753,47 @@ const styles = `
    anywhere for a theme to fail to reach. */
 /* One toolbar strip directly above the canvas: filter toggles on the left,
    the edge count, Fit and the Totals popover on the right. */
-.ngraph-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; color: var(--notible-muted); font-size: 12px; }
-/* The toggle groups have no container chrome of their own now — no fill, no
-   border, no pill. Each toggle is its own rounded-rectangle button. */
+.ngraph-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--notible-muted); font-size: 12px; }
 .ngraph-group { display: inline-flex; align-items: center; gap: 6px; }
-.ngraph-group--meta { position: relative; margin-left: auto; gap: 12px; }
+.ngraph-group--meta { position: relative; margin-left: auto; gap: 8px; }
+/* A thin rule takes the place of the old bordered group boxes — "layers"
+   still reads as a separate cluster from "views" without either group
+   getting a container of its own. */
+.ngraph-sep { width: 1px; align-self: stretch; margin: 2px 2px; background: var(--notible-border); }
 
-/* A toggle is a rounded-rectangle button: an outline, never a fill, until it
-   is on. The checkbox is still the control, laid over the whole button at zero
-   opacity so the pointer hits the input and the keyboard and screen reader
-   keep working. */
-.ngraph-toggle { position: relative; display: inline-flex; align-items: center; border: 1px solid var(--notible-border); border-radius: 7px; padding: 4px 10px; background: transparent; color: var(--notible-muted); cursor: pointer; user-select: none; }
-.ngraph-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border-radius: 7px; opacity: 0; cursor: pointer; }
+/* A toggle is the same flat pill Core's own search-filter chips use
+   (0.83.6): no border by default, a filled background on hover, an
+   accent-tinted fill when on — one control family instead of the plugin
+   inventing its own outlined-pill look. The checkbox is still the control,
+   laid over the whole button at zero opacity so the pointer hits the input
+   and the keyboard and screen reader keep working. */
+.ngraph-toggle { position: relative; display: inline-flex; align-items: center; height: 26px; border-radius: 999px; padding: 0 10px; background: var(--notible-hover); color: var(--notible-text); cursor: pointer; user-select: none; transition: background-color 140ms ease, color 140ms ease; }
+.ngraph-toggle input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; border-radius: 999px; opacity: 0; cursor: pointer; }
 /* On/off is a filled dot against an empty ring as well as a change of colour,
    for anyone who cannot separate hues. */
-.ngraph-toggle span::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border: 1px solid var(--notible-faint); border-radius: 50%; vertical-align: middle; }
-.ngraph-toggle:hover { border-color: var(--notible-accent); color: var(--notible-text); }
-.ngraph-toggle[data-on="yes"] { border-color: var(--notible-accent); background: var(--notible-selected); color: var(--notible-accent); }
-.ngraph-toggle[data-on="yes"] span::before { border-color: var(--notible-accent); background: var(--notible-accent); }
+.ngraph-toggle span::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: var(--notible-faint); vertical-align: middle; }
+.ngraph-toggle:hover { background: var(--notible-active); }
+.ngraph-toggle[data-on="yes"] { background: var(--notible-selected); color: var(--notible-accent); font-weight: 600; }
+.ngraph-toggle[data-on="yes"] span::before { background: var(--notible-accent); }
 .ngraph-toggle input:focus-visible { outline: 2px solid var(--notible-accent); outline-offset: 1px; }
 
 .ngraph-shown { color: var(--notible-faint); font-variant-numeric: tabular-nums; }
-.ngraph-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0; color: var(--notible-muted); font-size: 12px; }
-.ngraph-key { display: inline-flex; align-items: center; gap: 6px; }
-.ngraph-key::before { content: ""; width: 16px; height: 0; border-top: 1px solid var(--notible-muted); }
+.ngraph-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; color: var(--notible-muted); font-size: 12px; }
+.ngraph-legend + .ngraph-legend { margin-top: -2px; }
+.ngraph-key { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; }
+.ngraph-key::before { content: ""; width: 14px; height: 0; border-top: 1px solid var(--notible-muted); }
 .ngraph-key--parent::before { border-top-style: dashed; border-color: var(--notible-border); }
-.ngraph-key--free::before { width: 9px; height: 9px; border: 1px dashed var(--notible-muted); border-radius: 50%; }
+.ngraph-key--free::before { width: 8px; height: 8px; border: 1px dashed var(--notible-muted); border-radius: 50%; }
 .ngraph-key--semantic::before { border-top-style: dotted; border-color: var(--notible-muted); opacity: .6; }
-/* The type chips are buttons — filters, not just a key. They carry no border
-   of their own until hover so a row of them reads as a legend, not a toolbar;
-   the dot is the same hue formula the canvas dots use. data-off strikes the
-   chip through and fades it so a hidden type is obvious at a glance. */
-.ngraph-key--type { border: 1px solid transparent; border-radius: 999px; background: none; padding: 2px 8px 2px 6px; color: var(--notible-muted); font: inherit; font-size: 12px; cursor: pointer; }
-.ngraph-key--type::before { width: 9px; height: 9px; border: 0; border-radius: 50%; background: hsl(var(--type-hue) 55% 52%); }
-.ngraph-key--type:hover { border-color: var(--notible-border); background: var(--notible-hover); color: var(--notible-text); }
+/* The type chips are buttons — filters, not just a key — and now share the
+   toolbar toggle's flat-pill shape above, so the legend and the toolbar read
+   as one control family instead of two. data-off strikes the chip through
+   and fades it so a hidden type is obvious at a glance. */
+.ngraph-key--type { border: 0; border-radius: 999px; height: 24px; background: var(--notible-hover); padding: 0 9px 0 7px; color: var(--notible-text); font: inherit; font-size: 12px; cursor: pointer; transition: background-color 140ms ease; }
+.ngraph-key--type::before { width: 8px; height: 8px; border: 0; border-radius: 50%; background: hsl(var(--type-hue) 55% 52%); }
+.ngraph-key--type:hover { background: var(--notible-active); }
 .ngraph-key--type:focus-visible { outline: 2px solid var(--notible-accent); outline-offset: 1px; }
-.ngraph-key--type[data-off="yes"] { color: var(--notible-faint); text-decoration: line-through; }
+.ngraph-key--type[data-off="yes"] { background: none; color: var(--notible-faint); text-decoration: line-through; }
 .ngraph-key--type[data-off="yes"]::before { background: var(--notible-faint); }
 `;
 
@@ -1781,7 +1803,7 @@ export default {
   manifest: {
     id: "notible.graph",
     name: "Notible Graph",
-    version: "0.11.3",
+    version: "0.11.4",
     apiVersion: "1.8",
     description: "ALPHA — a map of the workspace: every object is a dot sized by how connected it is, coloured by its type, placed near what it relates to. Titles show for the dots that carry the structure and for whatever the pointer is over. Draws three kinds of edge and keeps them apart: containment, stored [[wikilinks]], and suggested edges from shared tags and title words, drawn weaker and always saying why. Hover a dot to fade everything it has no edge to; click a type in the legend to hide it. Built to show what the sidebar tree cannot: links that cross project boundaries, objects filed under nothing, and objects about the same thing that nobody linked. The visual design is still settling.",
     author: "Notible",

@@ -289,10 +289,11 @@ assert.ok(source.includes('canvas.dataset.crossingOnly') && source.includes('can
 assert.ok(/\.ngraph-canvas\[data-crossing-only="yes"\] \.ngraph-edge:not\(\[data-crossing="yes"\]\) \{ display: none/.test(source), "crossing-only hides every non-crossing edge, in CSS");
 assert.ok(/\.ngraph-canvas\[data-unfiled-only="yes"\] \.ngraph-node:not\(\[data-free="yes"\]\) \{ display: none/.test(source), "unfiled-only hides every filed node, in CSS");
 assert.ok(!/crossingOnly[\s\S]{0,300}(layout\(|simulationStep|wake\()/.test(source) && !/unfiledOnly[\s\S]{0,300}(layout\(|simulationStep|wake\()/.test(source), "neither view reshuffles the map");
-// The Fit button is Core's filled-bordo chrome button, a rounded rectangle
-// not a pill.
-assert.ok(/\.ngraph-fit \{[^}]*border-radius: 7px[^}]*background: var\(--notible-accent\)/.test(source), "Fit to window is a filled bordo rounded rectangle");
-assert.ok(/\.ngraph-toggle \{[^}]*border-radius: 7px[^}]*background: transparent/.test(source), "the toggles are outlined rounded rectangles, not filled pills");
+// 0.11.4 — matched to Core's own chip standard (the 0.83.6 search-filter
+// redesign): the Fit button and the toggles are now both flat pills, not
+// the plugin's earlier outlined-rectangle look.
+assert.ok(/\.ngraph-fit \{[^}]*border-radius: 999px[^}]*background: var\(--notible-accent\)/.test(source), "Fit to window is a filled accent pill");
+assert.ok(/\.ngraph-toggle \{[^}]*border-radius: 999px[^}]*background: var\(--notible-hover\)/.test(source), "the toggles are flat pills, matching Core's search-chip standard");
 // Totals opens as an absolute popover so it cannot push the toolbar wider or
 // the canvas down — the bug on the first pass.
 assert.ok(/\.ngraph-stats \{[\s\S]*?position: absolute/.test(source), "the Totals body is a popover, not an inline block that reflows the row");
