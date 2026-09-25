@@ -746,6 +746,8 @@ const REST_ENERGY = 0.5;
 /** Consecutive resting ticks before the loop parks itself. A couple of frames
  * of stillness in the middle of a settle is normal; twelve is not. */
 const REST_FRAMES = 12;
+/** Share of the remaining distance the camera closes each frame while the graph settles. */
+const FOLLOW_RATE = 0.06;
 /** How far a pointer must travel, in client pixels, before a press on a card
  * becomes a drag instead of a click. Small enough that dragging feels
  * immediate, large enough that a click with an unsteady hand still opens the
@@ -1037,6 +1039,7 @@ function drawGraph(graph, { container, openObject }) {
   // a drag). `canvas.viewTouched` is set by addPanZoom and by `grab`.
   canvas.viewTouched = false;
   let autoFitted = false;
+  let fitFrame = null;
   // A drag in flight owns three listeners on `window`, which outlive this SVG
   // if the user navigates away mid-gesture. Held so teardown can end them.
   const releaseGestures = new Set();
@@ -1049,13 +1052,26 @@ function drawGraph(graph, { container, openObject }) {
     const energy = simulationStep(positioned, graph.edges, { centre });
     place();
     resting = energy < REST_ENERGY ? resting + 1 : 0;
+    // The camera follows the graph while it settles (untouched views only), so there is no
+    // jump when the loop parks. Off with reduced motion: that graph is drawn settled anyway.
+    if (!canvas.viewTouched && !reducedMotion) canvas.easeToFit?.(FOLLOW_RATE);
     // Park the loop once it has visibly stopped — unless a dot is being held,
     // where "not moving" only means the user is not moving their hand yet.
     if (resting >= REST_FRAMES && !held) {
       frame = null;
       if (!autoFitted) {
         autoFitted = true;
-        if (!canvas.viewTouched) canvas.fitView?.();
+        // Finish the last stretch of the fit in a few eased frames rather than one cut.
+        let guard = 0;
+        const finishFit = () => {
+          fitFrame = null;
+          if (stopped || canvas.viewTouched) return;
+          const left = canvas.easeToFit?.(0.18) ?? 0;
+          guard += 1;
+          if (left > 0.002 && guard < 60) fitFrame = requestAnimationFrame(finishFit);
+          else canvas.fitView?.();
+        };
+        fitFrame = requestAnimationFrame(finishFit);
       }
       return;
     }
@@ -1178,6 +1194,8 @@ function drawGraph(graph, { container, openObject }) {
     for (const release of [...releaseGestures]) release();
     if (frame !== null) cancelAnimationFrame(frame);
     frame = null;
+    if (fitFrame !== null) cancelAnimationFrame(fitFrame);
+    fitFrame = null;
     canvas.stopPanZoom?.();
   };
 
@@ -1337,6 +1355,32 @@ function addPanZoom(canvas, fit, boundsNow = null) {
   };
 
   canvas.fitView = () => { view = { ...(boundsNow ? boundsNow() : fit) }; reframe(); };
+  /** The view that fitView would land on, without moving to it. */
+  const fitTarget = () => {
+    const saved = view;
+    view = { ...(boundsNow ? boundsNow() : fit) };
+    reframe();
+    const target = view;
+    view = saved;
+    return target;
+  };
+  /**
+   * Move a fraction `rate` of the way to the fitted view; returns how far is left (0 = arrived,
+   * as a share of the view width). Called every frame while the graph settles, so the camera
+   * follows the graph as it spreads instead of jumping to the fit the moment it stops.
+   */
+  canvas.easeToFit = (rate) => {
+    const to = fitTarget();
+    const left = Math.max(Math.abs(to.x - view.x), Math.abs(to.y - view.y), Math.abs(to.width - view.width)) / (view.width || 1);
+    view = {
+      x: view.x + (to.x - view.x) * rate,
+      y: view.y + (to.y - view.y) * rate,
+      width: view.width + (to.width - view.width) * rate,
+      height: view.height + (to.height - view.height) * rate,
+    };
+    apply();
+    return left;
+  };
   canvas.addEventListener("dblclick", () => canvas.fitView());
   reframe();
 
@@ -1803,7 +1847,7 @@ export default {
   manifest: {
     id: "notible.graph",
     name: "Notible Graph",
-    version: "0.11.4",
+    version: "0.11.5",
     apiVersion: "1.8",
     description: "ALPHA — a map of the workspace: every object is a dot sized by how connected it is, coloured by its type, placed near what it relates to. Titles show for the dots that carry the structure and for whatever the pointer is over. Draws three kinds of edge and keeps them apart: containment, stored [[wikilinks]], and suggested edges from shared tags and title words, drawn weaker and always saying why. Hover a dot to fade everything it has no edge to; click a type in the legend to hide it. Built to show what the sidebar tree cannot: links that cross project boundaries, objects filed under nothing, and objects about the same thing that nobody linked. The visual design is still settling.",
     author: "Notible",
