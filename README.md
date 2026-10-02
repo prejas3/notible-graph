@@ -311,8 +311,3 @@ mapping (deterministic, in range, order-independent, and separated enough to
 read on a small dot), the live simulation (finite, settles, never moves a
 pinned node), and the fact that the picture the graph opens on is still
 identical across two calls.
-
-## Install
-
-In Notible: **Settings -> Plugins -> Market**, then install "Notible Graph".
-This repo is the source; the market pulls `plugin.json` + `notible.graph.zip` from the latest GitHub Release.

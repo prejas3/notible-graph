@@ -1847,9 +1847,9 @@ export default {
   manifest: {
     id: "notible.graph",
     name: "Notible Graph",
-    version: "0.11.5",
+    version: "0.11.6",
     apiVersion: "1.8",
-    description: "ALPHA — a map of the workspace: every object is a dot sized by how connected it is, coloured by its type, placed near what it relates to. Titles show for the dots that carry the structure and for whatever the pointer is over. Draws three kinds of edge and keeps them apart: containment, stored [[wikilinks]], and suggested edges from shared tags and title words, drawn weaker and always saying why. Hover a dot to fade everything it has no edge to; click a type in the legend to hide it. Built to show what the sidebar tree cannot: links that cross project boundaries, objects filed under nothing, and objects about the same thing that nobody linked. The visual design is still settling.",
+    description: "ALPHA — a map of your workspace: every note, task and project is a dot, and lines show what links to what. Good for spotting notes that nothing points to and links between projects.",
     author: "Notible",
     permissions: ["data.read", "workspace.ui"],
   },
