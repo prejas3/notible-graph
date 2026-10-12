@@ -7,7 +7,7 @@
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import plugin, { boundsOf, buildGraph, canvasFor, crossingLinks, documentFrequency, hueOf, hueOfType, isGraphExcluded, keywordsOf, layout, LIVE_PHYSICS_MAX_NODES, MAX_RADIUS, nodeExit, radiusOf, reasonText, rootIdOf, semanticEdges, simulationStep, tagsOf, typeHues } from "./main.js";
+import plugin, { boundsOf, buildGraph, canvasFor, crossingLinks, documentFrequency, hueOf, hueOfType, isGraphExcluded, keywordsOf, layout, LIVE_PHYSICS_MAX_NODES, MAX_RADIUS, nodeExit, radiusOf, reasonText, rootIdOf, semanticEdges, simulationStep, tagsOf, typeHues, pluralText, EDGES_SHOWN } from "./main.js";
 
 // --- identity
 const declared = JSON.parse(readFileSync(new URL("./plugin.json", import.meta.url), "utf8"));
@@ -312,7 +312,7 @@ for (const dead of ["sameStatus", "dateProximity", "closeDate"]) {
 assert.ok(source.includes("context.views.register({"), "the graph's home is a registered view, not a modal");
 assert.ok(/context\.views\.register\(\{[\s\S]{0,240}mount:/.test(source), "a view without a mount renders nothing at all");
 assert.ok(/context\.views\.register\(\{[\s\S]{0,240}id: "surface"/.test(source), "the view id is slug-like and stable: it lands in the section string and a data attribute");
-assert.ok(/context\.views\.register\(\{[\s\S]{0,240}title: "Graph"/.test(source), "the title is the nav label verbatim, so it stays short enough for the rail");
+assert.ok(/context\.views\.register\(\{[\s\S]{0,240}title: (?:t\()?"Graph"/.test(source), "the title is the nav label verbatim, so it stays short enough for the rail");
 // One surface, two homes. Two copies of it drift, and the half that drifts is
 // always the one nobody opened while working on the other.
 assert.equal((source.match(/mountSurface\(context, host/g) ?? []).length, 2, "the view and the modal mount the same implementation");
@@ -522,5 +522,22 @@ assert.ok(source.includes("prefers-reduced-motion"), "reduced motion must skip t
 // The controls still may not move anything: a control that reshuffles the map
 // makes it impossible to see what the control did.
 assert.ok(!/applyFilter[\s\S]{0,400}(simulationStep|wake\()/.test(source), "filtering must not nudge the simulation either");
+
+// I18N (Hive #55): one table by count. English: one / other. Polish: one / few / other.
+// A locale without the translation, or an old Core whose t returns the key, must show English.
+{
+  const strings = JSON.parse(readFileSync(new URL("./locales/pl.json", import.meta.url), "utf8")).strings;
+  const translate = (language) => (key, values) => {
+    const text = language === "pl" && strings[key] !== undefined ? strings[key] : key;
+    return values ? text.replace(/\{(\w+)\}/g, (whole, name) => (name in values ? String(values[name]) : whole)) : text;
+  };
+  const show = (text, count) => text.replace("{count}", String(count));
+  for (const count of [1, 2, 5, 22]) {
+    assert.equal(pluralText(translate("en"), EDGES_SHOWN, count, "en", { count }), show(count === 1 ? "{count} edge shown" : "{count} edges shown", count), `English for ${count}`);
+    assert.equal(pluralText(translate("pl"), EDGES_SHOWN, count, "pl", { count }), show(count === 1 ? "{count} połączenie widoczne" : count === 5 ? "{count} połączeń widocznych" : "{count} połączenia widoczne", count), `Polish for ${count}`);
+  }
+  assert.equal(pluralText(translate("cs"), EDGES_SHOWN, 2, "cs", { count: 2 }), show("{count} edges shown", 2), "a locale with no translation shows English");
+  assert.equal(pluralText(translate("en"), EDGES_SHOWN, 2, "pl", { count: 2 }), show("{count} edges shown", 2), "an old Core (t returns the key) shows English");
+}
 
 console.log("Notible Graph self-check passed.");

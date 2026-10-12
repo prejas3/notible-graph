@@ -44,6 +44,25 @@
  * node; the plugin itself is the default export.
  */
 
+// I18N (Hive #28): every UI string goes through t(); Polish is in
+// locales/pl.json (checked by scripts/plugin-locale-check.mjs). English until
+// onload() hands t over to Core's translator, which also follows a language
+// change. tr() only marks a module-level label that is passed to t() later.
+let t = (key, values) => (values ? key.replace(/\{(\w+)\}/g, (whole, name) => (name in values ? String(values[name]) : whole)) : key);
+const tr = (key) => key;
+
+// I18N (Hive #55): text for a count. An `extra` key ("...#few") exists only in
+// locale files, so English never shows it; an untranslated one falls back to one/other.
+export const pluralText = (t, forms, count, locale, values) => {
+  const category = new Intl.PluralRules(locale || "en").select(count);
+  const extra = forms.extra?.[category];
+  return t(extra && t(extra) !== extra ? extra : category === "one" ? forms.one : forms.other, values);
+};
+const NOTES = { one: tr("note"), other: tr("notes"), extra: { few: tr("notes#few") } };
+const LINKS = { one: tr("link"), other: tr("links"), extra: { few: tr("links#few") } };
+const SUGGESTED = { one: tr("suggested"), other: tr("suggested"), extra: { one: tr("suggested#one"), few: tr("suggested#few") } };
+export const EDGES_SHOWN = { one: tr("{count} edge shown"), other: tr("{count} edges shown"), extra: { few: tr("{count} edges shown#few") } };
+
 /** Above this the picture is a hairball whatever the layout does, and the
  * O(n^2) repulsion below stops being free. Alpha: a flat cap and an honest
  * message rather than clustering nobody has designed yet.
@@ -157,7 +176,7 @@ export function buildGraph(objects, linkEntries = []) {
 
   const nodes = kept.map((object) => {
     const parentId = object.parent_id && byId.has(object.parent_id) ? object.parent_id : null;
-    const title = String(object.title ?? "").trim() || "Untitled";
+    const title = String(object.title ?? "").trim() || t("Untitled");
     return {
       id: object.id,
       title,
@@ -836,9 +855,9 @@ export function nodeExit(from, to, radius = 6) {
 /** Human wording for one reason. Kept out of the drawing so the self-check can
  * assert on it without a DOM. */
 export function reasonText(reason) {
-  if (reason.kind === "tag") return `shared tags: ${reason.value}`;
-  if (reason.kind === "keyword") return `shared words: ${reason.value}`;
-  if (reason.kind === "parent") return "same container";
+  if (reason.kind === "tag") return t("shared tags: {value}", { value: reason.value });
+  if (reason.kind === "keyword") return t("shared words: {value}", { value: reason.value });
+  if (reason.kind === "parent") return t("same container");
   return reason.kind;
 }
 
@@ -860,7 +879,7 @@ function drawGraph(graph, { container, openObject }) {
     viewBox: `${bounds.x} ${bounds.y} ${bounds.width} ${bounds.height}`,
     preserveAspectRatio: "xMidYMid meet",
     role: "img",
-    "aria-label": `Workspace graph: ${graph.nodes.length} notes`,
+    "aria-label": t("Workspace graph: {count} notes", { count: graph.nodes.length }),
   });
 
   const edgeLayer = svg("g", { class: "ngraph-edges" });
@@ -877,7 +896,7 @@ function drawGraph(graph, { container, openObject }) {
     // cannot be if the reason is not on the edge itself.
     if (edge.reasons?.length) {
       const why = document.createElementNS(SVG_NS, "title");
-      why.textContent = [`${from.title} ~ ${to.title}`, "Suggested, not a stored link", ...edge.reasons.map(reasonText)].join("\n");
+      why.textContent = [`${from.title} ~ ${to.title}`, t("Suggested, not a stored link"), ...edge.reasons.map(reasonText)].join("\n");
       line.append(why);
     }
     line.dataset.from = edge.from;
@@ -939,7 +958,7 @@ function drawGraph(graph, { container, openObject }) {
     const rootTitle = root ? byId.get(root)?.title ?? null : null;
     const hover = document.createElementNS(SVG_NS, "title");
     hover.textContent = node.free
-      ? `${node.title} — ${node.type}, not filed under anything`
+      ? t("{title} — {type}, not filed under anything", { title: node.title, type: node.type })
       : rootTitle
         ? `${node.title} — ${node.type}, in ${rootTitle}`
         : `${node.title} — ${node.type}`;
@@ -1419,7 +1438,7 @@ function mountSurface(context, { container, openObject }, { variant }) {
   // into and would keep an O(n^2) tick running against a detached SVG for
   // as long as the app is open.
   let drawnCanvas = null;
-  shell.append(text("p", "Reading the workspace…", "ngraph-note"));
+  shell.append(text("p", t("Reading the workspace…"), "ngraph-note"));
 
   void (async () => {
     let graph;
@@ -1443,22 +1462,21 @@ function mountSurface(context, { container, openObject }, { variant }) {
     // Totals are context, not the point of the screen — a closed disclosure
     // that rides at the end of the one control row rather than its own line.
     const stats = element("details", { className: "ngraph-stats-wrap" });
-    stats.append(text("summary", "Totals"));
+    stats.append(text("summary", t("Totals")));
+    // The published sentence, with each noun in the form its count needs.
+    const locale = context.i18n?.locale;
+    const links = graph.edges.filter((edge) => edge.kind === "link").length;
+    const suggested = graph.edges.filter((edge) => edge.kind === "semantic").length;
     stats.append(element("p", { className: "ngraph-stats" }, [
-      text("strong", String(graph.nodes.length)),
-      text("span", " notes · "),
-      text("strong", String(graph.edges.filter((edge) => edge.kind === "link").length)),
-      text("span", " links, "),
-      text("strong", String(crossing)),
-      text("span", " of them across containers · "),
-      text("strong", String(free)),
-      text("span", " filed under nothing · "),
-      text("strong", String(graph.edges.filter((edge) => edge.kind === "semantic").length)),
-      text("span", " suggested"),
+      text("strong", String(graph.nodes.length)), text("span", ` ${pluralText(t, NOTES, graph.nodes.length, locale)} · `),
+      text("strong", String(links)), text("span", ` ${pluralText(t, LINKS, links, locale)}, `),
+      text("strong", String(crossing)), text("span", ` ${t("of them across containers")} · `),
+      text("strong", String(free)), text("span", ` ${t("filed under nothing")} · `),
+      text("strong", String(suggested)), text("span", ` ${pluralText(t, SUGGESTED, suggested, locale)}`),
     ]));
 
     if (graph.nodes.length === 0) {
-      shell.append(text("p", "Nothing to draw yet.", "ngraph-note"));
+      shell.append(text("p", t("Nothing to draw yet."), "ngraph-note"));
       return;
     }
 
@@ -1466,7 +1484,7 @@ function mountSurface(context, { container, openObject }, { variant }) {
     const controls = element("div", { className: "ngraph-controls" });
     shell.append(controls, board);
     if (graph.truncated) {
-      shell.append(text("p", `Showing the first ${graph.nodes.length} of ${graph.total} objects.`, "ngraph-note"));
+      shell.append(text("p", t("Showing the first {shown} of {total} objects.", { shown: graph.nodes.length, total: graph.total }), "ngraph-note"));
     }
     const canvas = drawGraph(graph, { container: board, openObject });
     drawnCanvas = canvas;
@@ -1476,7 +1494,7 @@ function mountSurface(context, { container, openObject }, { variant }) {
     const shownCount = text("span", "", "ngraph-shown");
     const refresh = () => {
       const shown = canvas.applyFilter({ threshold, layers });
-      shownCount.textContent = `${shown} edges shown`;
+      shownCount.textContent = pluralText(t, EDGES_SHOWN, shown, context.i18n?.locale, { count: shown });
     };
 
     // A rounded-rectangle toggle button. The <input type="checkbox"> is still
@@ -1497,7 +1515,7 @@ function mountSurface(context, { container, openObject }, { variant }) {
 
     // Which edge kinds are drawn.
     const layerGroup = element("div", { className: "ngraph-group ngraph-group--layers" });
-    for (const [kind, label] of [["link", "Links"], ["parent", "Inside"], ["semantic", "Suggested"]]) {
+    for (const [kind, label] of [["link", t("Links")], ["parent", t("Inside")], ["semantic", t("Suggested")]]) {
       layerGroup.append(makeToggle(label, true, (on) => { layers[kind] = on; refresh(); }));
     }
     controls.append(layerGroup);
@@ -1507,10 +1525,10 @@ function mountSurface(context, { container, openObject }, { variant }) {
     // and notes filed under nothing. Both are pure show/hide over the same
     // positions — a data attribute on the canvas, the rest is CSS.
     const viewGroup = element("div", { className: "ngraph-group ngraph-group--views" });
-    viewGroup.append(makeToggle("Crossing only", false, (on) => {
+    viewGroup.append(makeToggle(t("Crossing only"), false, (on) => {
       if (on) canvas.dataset.crossingOnly = "yes"; else delete canvas.dataset.crossingOnly;
     }));
-    viewGroup.append(makeToggle("Unfiled only", false, (on) => {
+    viewGroup.append(makeToggle(t("Unfiled only"), false, (on) => {
       if (on) canvas.dataset.unfiledOnly = "yes"; else delete canvas.dataset.unfiledOnly;
     }));
     controls.append(viewGroup);
@@ -1523,7 +1541,7 @@ function mountSurface(context, { container, openObject }, { variant }) {
       element("button", {
         type: "button",
         className: "ngraph-fit",
-        textContent: "Fit to window",
+        textContent: t("Fit to window"),
         onclick: () => canvas.fitView(),
       }),
       stats,
@@ -1538,12 +1556,12 @@ function mountSurface(context, { container, openObject }, { variant }) {
     };
     const legend = element("p", { className: "ngraph-legend" });
     legend.append(
-      text("span", "Edges", "ngraph-legend-label"),
-      edgeKey("ngraph-key--link", "Link", "A [[wikilink]] you wrote between two notes."),
-      edgeKey("ngraph-key--parent", "Inside", "A note filed inside a container (folder or project)."),
-      edgeKey("ngraph-key--semantic", "Suggested", "Notible's guess from shared words — not a stored link."),
-      edgeKey("ngraph-key--free", "Filed under nothing", "A note with no container."),
-      text("span", "Types", "ngraph-legend-label"),
+      text("span", t("Edges"), "ngraph-legend-label"),
+      edgeKey("ngraph-key--link", t("Link"), t("A [[wikilink]] you wrote between two notes.")),
+      edgeKey("ngraph-key--parent", t("Inside"), t("A note filed inside a container (folder or project).")),
+      edgeKey("ngraph-key--semantic", t("Suggested"), t("Notible's guess from shared words — not a stored link.")),
+      edgeKey("ngraph-key--free", t("Filed under nothing"), t("A note with no container.")),
+      text("span", t("Types"), "ngraph-legend-label"),
     );
     // The type chips are FILTERS now, not just a key: click one to drop that
     // type (and its edges) from the canvas, click again to bring it back — the
@@ -1561,14 +1579,14 @@ function mountSurface(context, { container, openObject }, { variant }) {
     for (const entry of canvas.types.slice(0, TYPE_LEGEND_CAP)) {
       const chip = element("button", { type: "button", className: "ngraph-key ngraph-key--type" }, [text("span", capitalize(shortType(entry.type)))]);
       chip.style.setProperty("--type-hue", String(entry.hue));
-      chip.title = `${entry.type} — click to hide`;
+      chip.title = t("{type} — click to hide", { type: entry.type });
       chip.dataset.off = "no";
       chip.setAttribute("aria-pressed", "false");
       chip.addEventListener("click", () => {
         const off = chip.dataset.off !== "yes";
         chip.dataset.off = off ? "yes" : "no";
         chip.setAttribute("aria-pressed", off ? "true" : "false");
-        chip.title = `${entry.type} — click to ${off ? "show" : "hide"}`;
+        chip.title = off ? t("{type} — click to show", { type: entry.type }) : t("{type} — click to hide", { type: entry.type });
         if (off) canvas.hiddenTypes.add(entry.type);
         else canvas.hiddenTypes.delete(entry.type);
         canvas.applyTypeFilter();
@@ -1582,15 +1600,15 @@ function mountSurface(context, { container, openObject }, { variant }) {
       legend.append(more);
     }
     shell.append(legend);
-    shell.append(text("p", "Drag the background to pan, scroll to zoom, double-click to fit. Drag a dot to move it — it stays where you put it. Click a dot, or focus it and press Enter, to open the note. Click a type in the legend to hide it. “Crossing only” isolates links that leave their container; “unfiled only”, the notes filed under nothing.", "ngraph-note"));
+    shell.append(text("p", `${t("Drag the background to pan, scroll to zoom, double-click to fit. Drag a dot to move it — it stays where you put it. Click a dot, or focus it and press Enter, to open the note.")} ${t("Click a type in the legend to hide it. “Crossing only” isolates links that leave their container; “unfiled only”, the notes filed under nothing.")}`, "ngraph-note"));
     // If the physics is off, say why. Silently shipping a still graph and
     // letting the user wonder whether dragging is broken is the failure
     // this note exists to prevent.
     if (canvas.physics === "too-large") {
-      shell.append(text("p", `Live physics is off above ${LIVE_PHYSICS_MAX_NODES} dots: the force model is O(n²) per frame and would not fit in one at this size. Dots can still be dragged one at a time.`, "ngraph-note"));
+      shell.append(text("p", t("Live physics is off above {max} dots: the force model is O(n²) per frame and would not fit in one at this size. Dots can still be dragged one at a time.", { max: LIVE_PHYSICS_MAX_NODES }), "ngraph-note"));
     }
     if (canvas.physics === "reduced-motion") {
-      shell.append(text("p", "Reduced motion is on, so the graph is drawn settled and does not animate. Dots can still be dragged one at a time.", "ngraph-note"));
+      shell.append(text("p", t("Reduced motion is on, so the graph is drawn settled and does not animate. Dots can still be dragged one at a time."), "ngraph-note"));
     }
   })();
 
@@ -1606,7 +1624,7 @@ function mountSurface(context, { container, openObject }, { variant }) {
  */
 function openGraphModal(context) {
   context.ui.modal({
-    title: "Workspace graph (alpha)",
+    title: t("Workspace graph (alpha)"),
     mount: (host) => mountSurface(context, host, { variant: "modal" }),
   });
 }
@@ -1638,7 +1656,7 @@ function showGraph(context) {
     if (!shown) openGraphModal(context);
   }).catch((cause) => {
     // invoke rejects with strings rather than Errors, as elsewhere here.
-    context.ui.notice(`Could not open the graph: ${String(cause?.message ?? cause)}`);
+    context.ui.notice(t("Could not open the graph: {reason}", { reason: String(cause?.message ?? cause) }));
   });
 }
 
@@ -1847,7 +1865,7 @@ export default {
   manifest: {
     id: "notible.graph",
     name: "Notible Graph",
-    version: "0.11.6",
+    version: "0.11.7",
     apiVersion: "1.8",
     description: "ALPHA — a map of your workspace: every note, task and project is a dot, and lines show what links to what. Good for spotting notes that nothing points to and links between projects.",
     author: "Notible",
@@ -1855,6 +1873,8 @@ export default {
   },
 
   onload(context) {
+
+    if (context.i18n?.t) t = (key, values) => context.i18n.t(key, values);
     this._disposables = [];
 
     // The home: a registered view, which CoreOnlyApp renders as a nav entry
@@ -1865,7 +1885,7 @@ export default {
     // is changing a URL.
     this._disposables.push(context.views.register({
       id: "surface",
-      title: "Graph",
+      title: t("Graph"),
       // A whole workspace tool, not a settings screen — opts into a nav card.
       nav: true,
       navIcon: "network",
@@ -1881,8 +1901,8 @@ export default {
     // one click away and having both just doubled the entry point.
     this._disposables.push(context.commands.register({
       id: "open",
-      name: "Graph: map the workspace",
-      description: "Notes as dots, links as lines. Alpha. Opens the Graph pane, the same one the nav entry does.",
+      name: t("Graph: map the workspace"),
+      description: t("Notes as dots, links as lines. Alpha. Opens the Graph pane, the same one the nav entry does."),
       execute: () => showGraph(context),
     }));
   },
